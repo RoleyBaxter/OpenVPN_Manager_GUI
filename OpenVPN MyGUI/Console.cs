@@ -33,6 +33,7 @@ namespace OpenVPN_MyGUI
         public INetFwAuthorizedApplications defaultFWRules;
         public bool settingsChanged = false;
         public string[] cfgSave;
+        private Thread monitorThread;
 
         public Console()
         {
@@ -356,7 +357,30 @@ namespace OpenVPN_MyGUI
         // Connect to specified port on click.
         private void connectButton_Click(object sender, EventArgs e)
         {
-            if (MyControllers.tc == null || MyControllers.tc.Connected == false)
+            string input = portBox.Text;
+            int port = 0;
+            try
+            {
+                port = Convert.ToInt16(input);
+            }
+            catch (FormatException)
+            {
+                consoleTextBox.Text += "Error: Input for 'port' is not a sequence of digits" + "\r\n";
+            }
+            catch (OverflowException)
+            {
+                consoleTextBox.Text += "Error: port number is too long" + "\r\n";
+            }
+            finally
+            {
+                if(MyControllers.tc.Connected)
+                {
+                    MyControllers.tc.Close();
+
+                }
+                ConnectManager(port);
+            }
+            /*if (MyControllers.tc == null || MyControllers.tc.Connected == false)
             {
                 if (portBox.Text != "")
                 {
@@ -382,7 +406,7 @@ namespace OpenVPN_MyGUI
             }
             else
                 consoleTextBox.Text += "Already connected to management interface."+"\r\n";
-
+            */
 
         }
 
@@ -395,9 +419,9 @@ namespace OpenVPN_MyGUI
             {
                 MyControllers.tc.Connect("localhost", port);
             }
-            catch (SocketException)
+            catch (SocketException ex)
             {
-                consoleTextBox.Text += "No connection at port: " + port + "\r\n";
+                consoleTextBox.Text += "No connection at port: " + port + "\r\n" + ex.Message + "\r\n";
             }
             finally
             {
@@ -472,8 +496,10 @@ namespace OpenVPN_MyGUI
                     {
                         line = MyControllers.sr.ReadLine();
                     }
-                    catch(IOException)
-                    { }
+                    catch(IOException e)
+                    {
+                        SetText(e.Message);
+                    }
 
                     if (line != null)
                     {
@@ -483,7 +509,7 @@ namespace OpenVPN_MyGUI
                     }
                     Thread.Sleep(10);
                 }
-                else
+                else if (ConnectedBool == false)
                 {
                     break;
                 }
@@ -500,8 +526,8 @@ namespace OpenVPN_MyGUI
                     if (result[i] == "CONNECTED")
                     {
                         ConnectedBool = true;
-                        if(i < result.Length-2)
-                            SetIpLabel(result[i + 2]);
+                        if(i < result.Length-3)
+                            SetIpLabel(result[i + 3]);
                     }
 
                        
@@ -520,9 +546,12 @@ namespace OpenVPN_MyGUI
         //Start monitoring Management Interface stream in a new Thread.
         void MonitorStart()
         {
-            
-            Thread newThread = new Thread(() => MonitorStream());
-            newThread.Start();
+            if (monitorThread != null)
+            {
+                monitorThread.Abort();
+            }
+            monitorThread = new Thread(() => MonitorStream());
+            monitorThread.Start();
             consoleTextBox.Text += "Monitoring" + "\r\n"; //delete or change.
         }
 
@@ -550,9 +579,9 @@ namespace OpenVPN_MyGUI
                 p = new Process();
                 ServiceOption s = (ServiceOption)listBox1.SelectedItem;
                 p.StartInfo.FileName = oVPNCat + @"\bin\openvpn.exe";
-                p.StartInfo.Arguments = @"--config " + '"' + s.Value + '"' + " --ca " + '"' + s.Ca + '"' + " --management localhost " + defaultPort;
+                p.StartInfo.Arguments = @"--config " + '"' + s.Value + '"' + " --management 127.0.0.1 " + defaultPort;
                 consoleTextBox.Text += p.StartInfo.Arguments + "\r\n";
-                consoleTextBox.Text += s.Ca + "\r\n";
+                //consoleTextBox.Text += s.Ca + "\r\n";
                 p.StartInfo.Verb = "runas";
                 p.StartInfo.UseShellExecute = false;
                 p.StartInfo.CreateNoWindow = true;
@@ -597,6 +626,21 @@ namespace OpenVPN_MyGUI
         private void Console_FormClosing(object sender, FormClosingEventArgs e)
         {
             // ResetFWRules();
+            if (p != null && !p.HasExited)
+            {
+                p.Kill();
+            }
+
+            if (monitorThread != null)
+            {
+                monitorThread.Abort();
+                
+            }
+            if (MyControllers.tc != null && MyControllers.tc.Connected)
+            {
+                MyControllers.tc.Close();
+            }
+
             Application.Exit();
             
         }
@@ -633,10 +677,6 @@ namespace OpenVPN_MyGUI
             notifyIcon1.Text = connectedLabel.Text + "\r\n" + ipLabel.Text;
 
         }
-
-
-
-             
 
     }
 }
